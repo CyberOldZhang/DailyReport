@@ -1,4 +1,4 @@
-# --- 全新代码开始 (版本 2.3 - 终极健壮版) ---
+# --- 全新代码开始 (版本 2.4 - 赛季修正+队徽修复版) ---
 
 import requests
 from fastapi import FastAPI
@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 # --- 配置区 ---
 API_KEY = "3"
 LEAGUE_ID = "4328"
-SEASON = "2024-2025"
+# 【【【核心修复！！！】】】 将赛季更新为当前正在进行的赛季
+SEASON = "2025-2026" 
 TEAM_IDS = {
     "arsenal": "133602", "liverpool": "133601",
     "man_city": "134777", "fulham": "133600",
@@ -52,17 +53,19 @@ def get_premier_league_data():
     # 1. 获取积分榜
     standings_data = call_api("lookuptable.php", {"l": LEAGUE_ID, "s": SEASON})
     standings = []
-    # 【安全检查】 确认数据有效
     if standings_data and "table" in standings_data and standings_data["table"] is not None:
         for entry in standings_data["table"][:5]:
+            logo_url = entry.get('strTeamBadge')
+            # 【【【核心修复！！！】】】 去掉URL末尾的/preview，确保图片能显示
+            clean_logo_url = logo_url.replace('/preview', '') if logo_url else None
             standings.append({
                 "rank": entry.get('intRank', '#'),
                 "team": entry.get('strTeam', '未知球队'),
                 "points": entry.get('intPoints', 'N/A'),
-                "logo": entry.get('strTeamBadge')
+                "logo": clean_logo_url
             })
     
-    if not standings: # 如果循环后列表仍为空，说明获取失败
+    if not standings:
         standings.append({"error": "积分榜数据获取失败"})
 
     # 2. 获取关注球队的赛程
@@ -73,25 +76,22 @@ def get_premier_league_data():
         all_events_data = call_api("eventsseason.php", {"id": team_id, "s": SEASON})
         last_match, next_matches = "无赛果数据", []
         
-        # 【【【核心修复！！！】】】
-        # 在尝试访问 "events" 之前，先检查 all_events_data 是否为 None，以及 "events" 是否存在且不为 None
         if all_events_data and "events" in all_events_data and all_events_data["events"] is not None:
-            # 过滤掉没有时间戳的无效数据
             valid_events = [e for e in all_events_data["events"] if e.get('strTimestamp')]
             
-            # 安全地排序
-            events = sorted(
-                valid_events,
-                key=lambda x: datetime.fromisoformat(x['strTimestamp'].replace('Z', '+00:00'))
-            )
-            
-            past_events = [e for e in events if datetime.fromisoformat(e['strTimestamp'].replace('Z', '+00:00')) < now]
-            future_events = [e for e in events if datetime.fromisoformat(e['strTimestamp'].replace('Z', '+00:00')) >= now]
-            
-            if past_events:
-                last_match = format_event(past_events[-1])
-            if future_events:
-                next_matches = [format_event(e) for e in future_events[:2]]
+            if valid_events:
+                events = sorted(
+                    valid_events,
+                    key=lambda x: datetime.fromisoformat(x['strTimestamp'].replace('Z', '+00:00'))
+                )
+                
+                past_events = [e for e in events if datetime.fromisoformat(e['strTimestamp'].replace('Z', '+00:00')) < now]
+                future_events = [e for e in events if datetime.fromisoformat(e['strTimestamp'].replace('Z', '+00:00')) >= now]
+                
+                if past_events:
+                    last_match = format_event(past_events[-1])
+                if future_events:
+                    next_matches = [format_event(e) for e in future_events[:2]]
 
         tracked_teams_results[team_name] = {
             "last_match": last_match,
@@ -102,6 +102,6 @@ def get_premier_league_data():
 
 @app.get("/")
 def read_root():
-    return {"message": "欢迎来到 DailyReport API v2.3 (终极健壮版)"}
+    return {"message": "欢迎来到 DailyReport API v2.4 (最终修正版)"}
 
 # --- 全新代码结束 ---
