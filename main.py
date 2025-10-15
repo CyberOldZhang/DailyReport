@@ -1,4 +1,4 @@
-# Filename: main.py (Version 2.0 - API Edition)
+# --- 全新代码开始 (版本 2.1 - 精简版) ---
 
 import requests
 from fastapi import FastAPI, HTTPException
@@ -8,7 +8,8 @@ from datetime import datetime
 # --- 配置区 ---
 API_KEY = "3"  # TheSportsDB 提供的免费公共API密钥
 LEAGUE_ID = "4328"  # 英超联赛 (Premier League) 的ID
-SEASON = "2025-2026" # 当前赛季
+# 注意：赛季年份应与当前赛季匹配，TheSportsDB可能更新较慢，我们先用一个最近的年份
+SEASON = "2024-2025" 
 TEAM_IDS = {
     "arsenal": "133602",
     "liverpool": "133601",
@@ -69,7 +70,7 @@ def format_event(event: dict) -> str:
 @app.get("/api/sports/premier-league")
 def get_premier_league_data():
     """
-    提供英超数据的API接口 (V2 - TheSportsDB)
+    提供英超数据的API接口 (V2.1 - 精简版)
     """
     # 1. 获取积分榜
     standings_data = call_api("lookuptable.php", {"l": LEAGUE_ID, "s": SEASON})
@@ -106,15 +107,14 @@ def get_premier_league_data():
             "next_matches": next_matches_list if next_matches_list else ["无未来赛程数据"]
         }
 
-    # 3. 整合最终结果
-    # 务实说明：射手榜和助攻榜是付费API功能，免费版无法获取
+    # 3. 整合最终结果 (精简版)
     return {
         "standings": standings,
-        "top_scorers": ["射手榜需付费API，功能待定"],
-        "assists_leaders": ["助攻榜需付费API，功能待定"],
         "tracked_teams": tracked_teams_results,
     }
 
 @app.get("/")
 def read_root():
-    return {"message": "欢迎来到 DailyReport API v2.0"}
+    return {"message": "欢迎来到 DailyReport API v2.1 (精简版)"}
+
+# --- 全新代码结束 ---
