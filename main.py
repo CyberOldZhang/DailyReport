@@ -1,4 +1,4 @@
-# --- 全新代码开始 (版本 2.2 - 健壮版+队徽) ---
+# --- 全新代码开始 (版本 2.3 - 终极健壮版) ---
 
 import requests
 from fastapi import FastAPI
@@ -49,10 +49,11 @@ def format_event(event: dict) -> str:
 # --- API 端点定义 ---
 @app.get("/api/sports/premier-league")
 def get_premier_league_data():
-    # 1. 获取积分榜 (包含队徽)
+    # 1. 获取积分榜
     standings_data = call_api("lookuptable.php", {"l": LEAGUE_ID, "s": SEASON})
     standings = []
-    if standings_data and "table" in standings_data:
+    # 【安全检查】 确认数据有效
+    if standings_data and "table" in standings_data and standings_data["table"] is not None:
         for entry in standings_data["table"][:5]:
             standings.append({
                 "rank": entry.get('intRank', '#'),
@@ -60,10 +61,11 @@ def get_premier_league_data():
                 "points": entry.get('intPoints', 'N/A'),
                 "logo": entry.get('strTeamBadge')
             })
-    else:
+    
+    if not standings: # 如果循环后列表仍为空，说明获取失败
         standings.append({"error": "积分榜数据获取失败"})
 
-    # 2. 获取关注球队的赛程 (健壮逻辑)
+    # 2. 获取关注球队的赛程
     tracked_teams_results = {}
     now = datetime.now(timezone.utc)
     
@@ -71,9 +73,15 @@ def get_premier_league_data():
         all_events_data = call_api("eventsseason.php", {"id": team_id, "s": SEASON})
         last_match, next_matches = "无赛果数据", []
         
-        if all_events_data and "events" in all_events_data:
+        # 【【【核心修复！！！】】】
+        # 在尝试访问 "events" 之前，先检查 all_events_data 是否为 None，以及 "events" 是否存在且不为 None
+        if all_events_data and "events" in all_events_data and all_events_data["events"] is not None:
+            # 过滤掉没有时间戳的无效数据
+            valid_events = [e for e in all_events_data["events"] if e.get('strTimestamp')]
+            
+            # 安全地排序
             events = sorted(
-                [e for e in all_events_data["events"] if e.get('strTimestamp')],
+                valid_events,
                 key=lambda x: datetime.fromisoformat(x['strTimestamp'].replace('Z', '+00:00'))
             )
             
@@ -94,6 +102,6 @@ def get_premier_league_data():
 
 @app.get("/")
 def read_root():
-    return {"message": "欢迎来到 DailyReport API v2.2 (健壮版)"}
+    return {"message": "欢迎来到 DailyReport API v2.3 (终极健壮版)"}
 
 # --- 全新代码结束 ---
