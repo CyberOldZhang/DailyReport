@@ -1,20 +1,17 @@
-# --- 全新代码开始 (版本 2.1 - 精简版) ---
+# --- 全新代码开始 (版本 2.2 - 健壮版+队徽) ---
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime
+from datetime import datetime, timezone
 
 # --- 配置区 ---
-API_KEY = "3"  # TheSportsDB 提供的免费公共API密钥
-LEAGUE_ID = "4328"  # 英超联赛 (Premier League) 的ID
-# 注意：赛季年份应与当前赛季匹配，TheSportsDB可能更新较慢，我们先用一个最近的年份
-SEASON = "2024-2025" 
+API_KEY = "3"
+LEAGUE_ID = "4328"
+SEASON = "2024-2025"
 TEAM_IDS = {
-    "arsenal": "133602",
-    "liverpool": "133601",
-    "man_city": "134777",
-    "fulham": "133600",
+    "arsenal": "133602", "liverpool": "133601",
+    "man_city": "134777", "fulham": "133600",
 }
 
 # --- FastAPI 应用设置 ---
@@ -25,96 +22,78 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
-# --- 辅助函数：用于调用API和格式化数据 ---
-
+# --- 辅助函数 ---
 def call_api(endpoint: str, params: dict):
-    """一个通用的API请求函数"""
     base_url = f"https://www.thesportsdb.com/api/v1/json/{API_KEY}/{endpoint}"
     try:
-        response = requests.get(base_url, params=params)
+        response = requests.get(base_url, params=params, timeout=10)
         response.raise_for_status()
-        data = response.json()
-        return data
+        return response.json()
     except requests.exceptions.RequestException as e:
-        # 如果网络请求失败，返回None
-        print(f"API call failed for {endpoint}: {e}") # 在后端日志中打印错误
+        print(f"API call failed for {endpoint}: {e}")
         return None
 
 def format_event(event: dict) -> str:
-    """将API返回的比赛数据格式化为一行可读的字符串"""
-    try:
-        home = event.get('strHomeTeam', 'N/A')
-        away = event.get('strAwayTeam', 'N/A')
-        home_score = event.get('intHomeScore', '?')
-        away_score = event.get('intAwayScore', '?')
-        
-        # 格式化日期
-        event_date_str = event.get('dateEvent')
-        if event_date_str:
-            event_date = datetime.strptime(event_date_str, "%Y-%m-%d")
-            date_formatted = event_date.strftime("%m月%d日")
-        else:
-            date_formatted = "日期未知"
-
-        # 如果比赛已结束，显示比分；否则显示对阵双方
-        if home_score is not None and away_score is not None:
-            return f"{date_formatted}: {home} {home_score} - {away_score} {away}"
-        else:
-            return f"{date_formatted}: {home} vs {away}"
-    except Exception:
-        return "比赛数据格式化错误"
-
+    home = event.get('strHomeTeam', 'N/A')
+    away = event.get('strAwayTeam', 'N/A')
+    home_score = event.get('intHomeScore')
+    away_score = event.get('intAwayScore')
+    event_date_str = event.get('dateEventLocal')
+    
+    date_formatted = datetime.strptime(event_date_str, "%Y-%m-%d").strftime("%m月%d日") if event_date_str else "日期未知"
+    
+    if home_score is not None and away_score is not None:
+        return f"{date_formatted}: {home} {home_score} - {away_score} {away}"
+    return f"{date_formatted}: {home} vs {away}"
 
 # --- API 端点定义 ---
-
 @app.get("/api/sports/premier-league")
 def get_premier_league_data():
-    """
-    提供英超数据的API接口 (V2.1 - 精简版)
-    """
-    # 1. 获取积分榜
+    # 1. 获取积分榜 (包含队徽)
     standings_data = call_api("lookuptable.php", {"l": LEAGUE_ID, "s": SEASON})
     standings = []
     if standings_data and "table" in standings_data:
-        # 只取前5名
         for entry in standings_data["table"][:5]:
-            team = entry.get('strTeam', '未知球队')
-            points = entry.get('intPoints', 'N/A')
-            rank = entry.get('intRank', '#')
-            standings.append(f"{rank}. {team} ({points}分)")
+            standings.append({
+                "rank": entry.get('intRank', '#'),
+                "team": entry.get('strTeam', '未知球队'),
+                "points": entry.get('intPoints', 'N/A'),
+                "logo": entry.get('strTeamBadge')
+            })
     else:
-        standings.append("积分榜数据获取失败")
+        standings.append({"error": "积分榜数据获取失败"})
 
-    # 2. 获取关注球队的赛程
+    # 2. 获取关注球队的赛程 (健壮逻辑)
     tracked_teams_results = {}
+    now = datetime.now(timezone.utc)
+    
     for team_name, team_id in TEAM_IDS.items():
-        # 获取上一场比赛
-        last_match_data = call_api("eventslast.php", {"id": team_id})
-        last_match_str = "无上一场比赛数据"
-        if last_match_data and "results" in last_match_data:
-            last_match_str = format_event(last_match_data["results"][0])
-
-        # 获取未来两场比赛
-        next_matches_data = call_api("eventsnext.php", {"id": team_id})
-        next_matches_list = []
-        if next_matches_data and "events" in next_matches_data:
-            # 只取未来两场
-            for event in next_matches_data["events"][:2]:
-                next_matches_list.append(format_event(event))
+        all_events_data = call_api("eventsseason.php", {"id": team_id, "s": SEASON})
+        last_match, next_matches = "无赛果数据", []
         
+        if all_events_data and "events" in all_events_data:
+            events = sorted(
+                [e for e in all_events_data["events"] if e.get('strTimestamp')],
+                key=lambda x: datetime.fromisoformat(x['strTimestamp'].replace('Z', '+00:00'))
+            )
+            
+            past_events = [e for e in events if datetime.fromisoformat(e['strTimestamp'].replace('Z', '+00:00')) < now]
+            future_events = [e for e in events if datetime.fromisoformat(e['strTimestamp'].replace('Z', '+00:00')) >= now]
+            
+            if past_events:
+                last_match = format_event(past_events[-1])
+            if future_events:
+                next_matches = [format_event(e) for e in future_events[:2]]
+
         tracked_teams_results[team_name] = {
-            "last_match": last_match_str,
-            "next_matches": next_matches_list if next_matches_list else ["无未来赛程数据"]
+            "last_match": last_match,
+            "next_matches": next_matches if next_matches else ["无未来赛程"]
         }
 
-    # 3. 整合最终结果 (精简版)
-    return {
-        "standings": standings,
-        "tracked_teams": tracked_teams_results,
-    }
+    return {"standings": standings, "tracked_teams": tracked_teams_results}
 
 @app.get("/")
 def read_root():
-    return {"message": "欢迎来到 DailyReport API v2.1 (精简版)"}
+    return {"message": "欢迎来到 DailyReport API v2.2 (健壮版)"}
 
 # --- 全新代码结束 ---
